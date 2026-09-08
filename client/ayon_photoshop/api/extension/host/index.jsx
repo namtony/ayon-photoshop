@@ -13,6 +13,28 @@ function fileOpen(path){
     return app.open(new File(path));
 }
 
+function createDocument(name, width, height, resolution){
+    /** Creates a new blank RGB/8bit document and makes it active.
+     *
+     * name - document name (also used as initial title in Photoshop UI)
+     * width, height - pixel dimensions
+     * resolution - dpi
+     *
+     * Returns the id of the newly created document.
+     * */
+    var prevUnits = app.preferences.rulerUnits;
+    app.preferences.rulerUnits = Units.PIXELS;
+    try {
+        var doc = app.documents.add(
+            width, height, resolution, name,
+            NewDocumentMode.RGB, DocumentFill.WHITE
+        );
+        return doc.id;
+    } finally {
+        app.preferences.rulerUnits = prevUnits;
+    }
+}
+
 function getLayerTypeWithName(layerName) {
     var type = 'NA';
     var nameParts = layerName.split('_');
@@ -43,14 +65,14 @@ function getLayerTypeWithName(layerName) {
 
 function getLayers() {
     /**
-     * Get json representation of list of layers. 
+     * Get json representation of list of layers.
      * Much faster this way than in DOM traversal (2s vs 45s on same file)
-     * 
+     *
      * Format of single layer info:
      *      id :    number
      *      name:   string
      *      group:  boolean - true if layer is a group
-     *      parents:array - list of ids of parent groups, useful for selection 
+     *      parents:array - list of ids of parent groups, useful for selection
      *          all children layers from parent layerSet (eg. group)
      *      type:   string - type of layer guessed from its name
      *      visible:boolean - true if visible
@@ -59,14 +81,14 @@ function getLayers() {
         return '[]';
     }
     var ref1 = new ActionReference();
-    ref1.putEnumerated(charIDToTypeID('Dcmn'), charIDToTypeID('Ordn'), 
+    ref1.putEnumerated(charIDToTypeID('Dcmn'), charIDToTypeID('Ordn'),
                        charIDToTypeID('Trgt'));
     var count = executeActionGet(ref1).getInteger(charIDToTypeID('NmbL'));
 
     // get all layer names
     var layers = [];
     var layer = {};
-    
+
     var parents = [];
     for (var i = count; i >= 1; i--) {
       var layer = {};
@@ -76,8 +98,8 @@ function getLayers() {
       var desc = executeActionGet(ref2);  // Access layer index #i
       var layerSection = typeIDToStringID(desc.getEnumerationValue(
                                           stringIDToTypeID('layerSection')));
-      
-      layer.id = desc.getInteger(stringIDToTypeID("layerID")); 
+
+      layer.id = desc.getInteger(stringIDToTypeID("layerID"));
       layer.name = desc.getString(stringIDToTypeID("name"));
       layer.color_code = typeIDToStringID(desc.getEnumerationValue(stringIDToTypeID('color')));
       layer.group = false;
@@ -86,16 +108,16 @@ function getLayers() {
       layer.visible = desc.getBoolean(stringIDToTypeID("visible"));
       var blendMode = desc.getEnumerationValue(stringIDToTypeID("mode"));
       layer.blend_mode = typeIDToStringID(blendMode);
-      //log(" name: " + layer.name + " groupId " + layer.groupId + 
+      //log(" name: " + layer.name + " groupId " + layer.groupId +
       //" group " + layer.group);
       if (layerSection == 'layerSectionStart') { // Group start and end
-        parents.push(layer.id); 
-        layer.group = true;                    
+        parents.push(layer.id);
+        layer.group = true;
       }
       if (layerSection == 'layerSectionEnd') {
         parents.pop();
         continue;
-      } 
+      }
       layers.push(JSON.stringify(layer));
     }
      try{
@@ -123,10 +145,10 @@ function setVisible(layer_id, visibility){
     var ref = new ActionReference();
     ref.putIdentifier(stringIDToTypeID("layer"), layer_id);
     desc.putReference(stringIDToTypeID("null"), ref);
-    
-    executeAction(visibility?stringIDToTypeID("show"):stringIDToTypeID("hide"), 
+
+    executeAction(visibility?stringIDToTypeID("show"):stringIDToTypeID("hide"),
                   desc, DialogModes.NO);
-    
+
 }
 
 function setLayersVisibility(visibilityMap) {
@@ -144,14 +166,14 @@ function setLayersVisibility(visibilityMap) {
 
 function getHeadline(){
     /**
-     *  Returns headline of current document with metadata 
-     * 
+     *  Returns headline of current document with metadata
+     *
      **/
     if (documents.length == 0){
         return '';
     }
     var headline = app.activeDocument.info.headline;
-    
+
     return headline;
 }
 
@@ -160,7 +182,7 @@ function isSaved(){
 }
 
 function save(){
-    /** Saves active document **/        
+    /** Saves active document **/
     return app.activeDocument.save();
 }
 
@@ -282,13 +304,13 @@ function getLayerBlendMode(layer_id) {
 
 function saveAs(output_path, ext, as_copy){
     /** Exports scene to various formats
-     * 
-     * Currently implemented: 'jpg', 'png', 'psd'
-     * 
+     *
+     * Currently implemented: 'jpg', 'png', 'psd', 'tga', 'exr', 'psb', and 'tif'.
+     *
      * output_path - escaped file path on local system
      * ext - extension for export
      * as_copy - create copy, do not overwrite
-     * 
+     *
      * */
     var saveName = output_path;
     var saveOptions;
@@ -351,7 +373,14 @@ function saveAs(output_path, ext, as_copy){
         if (ext === 'psb') {
             return savePSB(output_path);
         }
-
+        // For TIF/TIFF, ensure saveOptions is properly initialized
+        if (ext === 'tif' || ext === 'tiff') {
+            saveOptions = new TiffSaveOptions();
+            saveOptions.alphaChannels = true;
+            saveOptions.transparency = true;
+            saveOptions.imageCompression = TIFFEncoding.TIFFLZW;
+            saveOptions.layers = false;
+        }
         return doc.saveAs(new File(saveName), saveOptions, as_copy);
     }
     finally {
@@ -443,7 +472,7 @@ function imprint(payload){
      *  Sets headline content of current document with metadata. Stores
      *  information about assets created through AYON.
      *  Content accessible in PS through File > File Info
-     * 
+     *
      **/
     app.activeDocument.info.headline = payload;
 }
@@ -462,7 +491,7 @@ function getSelectedLayers(doc) {
         
     var selLayers = [];
     _grp = groupSelectedLayers(doc);
-  
+
     var group = doc.activeLayer;
     var layers = group.layers;
 
@@ -479,7 +508,7 @@ function getSelectedLayers(doc) {
         layer.name = layers[i].name;
         long_names =_get_parents_names(group.parent, layers[i].name);
         var t = layers[i].kind;
-        if ((typeof t !== 'undefined') && 
+        if ((typeof t !== 'undefined') &&
             (layers[i].kind.toString() == 'LayerKind.NORMAL')){
             layer.group = false;
         }else{
@@ -489,9 +518,9 @@ function getSelectedLayers(doc) {
         
         selLayers.push(layer);
     }
-  
+
     _undo();
-  
+
     return JSON.stringify(selLayers);
 };
 
@@ -505,7 +534,7 @@ function selectLayers(selectedLayers){
     var desc12 = new ActionDescriptor();
     var id55 = charIDToTypeID( "null" );
     var ref9 = new ActionReference();
-    
+
     var existing_layers = JSON.parse(getLayers());
     var existing_ids = [];
     for (var y = 0; y < existing_layers.length; y++){
@@ -517,7 +546,7 @@ function selectLayers(selectedLayers){
        if(existing_ids.toString().indexOf(id)>=0){
            layers[i] = charIDToTypeID( "Lyr " );
            ref9.putIdentifier(layers[i], id);
-       }       
+       }
     }
     desc12.putReference( id55, ref9 );
     var id58 = charIDToTypeID( "MkVs" );
@@ -529,7 +558,7 @@ function groupSelectedLayers(doc, name) {
     /**
      * Groups selected layers into new group.
      * Returns json representation of Layer for server to consume
-     * 
+     *
      * Args:
      *     doc(activeDocument)
      *     name (str): new name of created group
@@ -537,30 +566,30 @@ function groupSelectedLayers(doc, name) {
     if (doc == null){
         doc = app.activeDocument;
     }
-    
+
     var desc = new ActionDescriptor();
     var ref = new ActionReference();
     ref.putClass( stringIDToTypeID('layerSection') );
     desc.putReference( charIDToTypeID('null'), ref );
     var lref = new ActionReference();
-    lref.putEnumerated( charIDToTypeID('Lyr '), charIDToTypeID('Ordn'), 
+    lref.putEnumerated( charIDToTypeID('Lyr '), charIDToTypeID('Ordn'),
                         charIDToTypeID('Trgt') );
     desc.putReference( charIDToTypeID('From'), lref);
     executeAction( charIDToTypeID('Mk  '), desc, DialogModes.NO );
-    
+
     var group = doc.activeLayer;
     if (name){
         // Add special character to highlight group that will be published
         group.name = name;
-    }   
+    }
     var layer = {};
     layer.id = group.id;
     layer.name = name; // keep name clean
-    layer.group = true; 
+    layer.group = true;
 
     layer.long_name = _get_parents_names(group, name);
 
-    return JSON.stringify(layer);        
+    return JSON.stringify(layer);
 };
 
 /**
@@ -617,6 +646,9 @@ function mergeAllLayerSets(parentSetId) {
 
     // Merge all layersets and keep visibility
     for (var i = layerSets.length - 1; i >= 0; i--) {
+        if (layerSets[i].layers.length === 0) {
+            continue;
+        }
         var visibility = layerSets[i].visible;
         newArtLayer = layerSets[i].merge();
         newArtLayer.visible = visibility;
@@ -626,26 +658,26 @@ function mergeAllLayerSets(parentSetId) {
 function importSmartObject(path, name, link){
     /**
      *  Creates new layer with an image from 'path'
-     *  
+     *
      *      path: absolute path to loaded file
      *      name: sets name of newly created laye
-     *  
+     *
      **/
     var desc1 = new ActionDescriptor();
     desc1.putPath( app.charIDToTypeID("null"), new File(path) );
     link = link || false;
     if (link) {
-        desc1.putBoolean( app.charIDToTypeID('Lnkd'), true );  
+        desc1.putBoolean( app.charIDToTypeID('Lnkd'), true );
     }
 
-    desc1.putEnumerated(app.charIDToTypeID("FTcs"), app.charIDToTypeID("QCSt"), 
-                       app.charIDToTypeID("Qcsa"));                     
+    desc1.putEnumerated(app.charIDToTypeID("FTcs"), app.charIDToTypeID("QCSt"),
+                       app.charIDToTypeID("Qcsa"));
     var desc2 = new ActionDescriptor();
-    desc2.putUnitDouble(app.charIDToTypeID("Hrzn"), 
+    desc2.putUnitDouble(app.charIDToTypeID("Hrzn"),
                         app.charIDToTypeID("#Pxl"), 0.0);
-    desc2.putUnitDouble(app.charIDToTypeID("Vrtc"), 
+    desc2.putUnitDouble(app.charIDToTypeID("Vrtc"),
                         app.charIDToTypeID("#Pxl"), 0.0);
-    
+
     desc1.putObject(charIDToTypeID("Ofst"), charIDToTypeID("Ofst"), desc2);
     executeAction(charIDToTypeID("Plc " ), desc1, DialogModes.NO);
 
@@ -656,14 +688,14 @@ function importSmartObject(path, name, link){
     }
     var layer = {}
     layer.id = currentActivelayer.id;
-    layer.name = currentActivelayer.name;                        
-    return JSON.stringify(layer);     
+    layer.name = currentActivelayer.name;
+    return JSON.stringify(layer);
 }
 
 function replaceSmartObjects(layer_id, path, name){
     /**
      *  Updates content of 'layer' with an image from 'path'
-     *  
+     *
      **/
 
     var desc = new ActionDescriptor();
@@ -674,12 +706,12 @@ function replaceSmartObjects(layer_id, path, name){
     desc.putPath(charIDToTypeID('null'), new File(path) );
     desc.putInteger(charIDToTypeID("PgNm"), 1);
 
-    executeAction(stringIDToTypeID('placedLayerReplaceContents'), 
-                  desc, DialogModes.NO );       
+    executeAction(stringIDToTypeID('placedLayerReplaceContents'),
+                  desc, DialogModes.NO );
     var currentActivelayer = app.activeDocument.activeLayer;
     if (name){
         currentActivelayer.name = name;
-    }                  
+    }
 }
 
 function createGroup(name){
@@ -690,14 +722,14 @@ function createGroup(name){
     group = app.activeDocument.layerSets.add();
     // Add special character to highlight group that will be published
     group.name = name;
-       
+
     return group.id;  // only id available at this time :|
 }
 
-function deleteLayer(layer_id){          
+function deleteLayer(layer_id){
     /***
      * Deletes layer by its layer_id
-     * 
+     *
      * layer_id (int)
      **/
     var d = new ActionDescriptor();
@@ -739,16 +771,16 @@ function saveEXR(savePath) {
 function savePSB(output_path){
     /***
      * Saves file as .psb to 'output_path'
-     * 
+     *
      * output_path (str)
      **/
     var desc1 = new ActionDescriptor();
     var desc2 = new ActionDescriptor();
-    desc2.putBoolean( stringIDToTypeID('maximizeCompatibility'), true );        
-    desc1.putObject( charIDToTypeID('As  '), charIDToTypeID('Pht8'), desc2 );        
-    desc1.putPath( charIDToTypeID('In  '), new File(output_path) );       
-    desc1.putBoolean( charIDToTypeID('LwCs'), true );        
-    executeAction( charIDToTypeID('save'), desc1, DialogModes.NO );      
+    desc2.putBoolean( stringIDToTypeID('maximizeCompatibility'), true );
+    desc1.putObject( charIDToTypeID('As  '), charIDToTypeID('Pht8'), desc2 );
+    desc1.putPath( charIDToTypeID('In  '), new File(output_path) );
+    desc1.putBoolean( charIDToTypeID('LwCs'), true );
+    executeAction( charIDToTypeID('save'), desc1, DialogModes.NO );
 }
 
 function close(){
@@ -758,13 +790,13 @@ function close(){
 function renameLayer(layer_id, new_name){
     /***
      * Renames 'layer_id' to 'new_name'
-     * 
+     *
      * Via Action (fast)
-     * 
+     *
      * Args:
      *    layer_id(int)
      *    new_name(str)
-     * 
+     *
      * output_path (str)
      **/
     doc = app.activeDocument;
@@ -785,22 +817,35 @@ function _get_parents_names(layer, itself_name){
     return long_names;
 }
 
+function _get_long_layer_name(layer) {
+    /***
+     * Return the full path of 'layer', e.g. "GROUP/SUBGROUP/LAYER".
+     ***/
+    var parts = [layer.name];
+    var node = layer.parent;
+    while (node && node.typename === "LayerSet") {
+        parts.unshift(node.name);
+        node = node.parent;
+    }
+    return parts.join("/");
+}
+
 function _isSmartObjectLinkBroken(layer) {
     /***
      * Returns true if 'layer' (a SMARTOBJECT) has a broken or missing link.
      * Handles both CC Libraries assets (linkMissing flag) and local linked
      * files (link.status field).
      *
+     * Reads the layer descriptor by ID without touching the active layer:
+     * assigning 'activeLayer' forces hidden layers/groups visible.
+     *
      * layer - ArtLayer whose kind === LayerKind.SMARTOBJECT
      ***/
+    var layerName = "<unknown>";
+    try { layerName = _get_long_layer_name(layer); } catch (e) {}
     try {
-        app.activeDocument.activeLayer = layer;
         var ref = new ActionReference();
-        ref.putEnumerated(
-            charIDToTypeID("Lyr "),
-            charIDToTypeID("Ordn"),
-            charIDToTypeID("Trgt")
-        );
+        ref.putIdentifier(charIDToTypeID("Lyr "), layer.id);
         var desc = executeActionGet(ref);
         if (!desc.hasKey(stringIDToTypeID("smartObject"))) {
             return false;
@@ -822,14 +867,16 @@ function _isSmartObjectLinkBroken(layer) {
                 }
             }
         }
-    } catch (e) {}
+    } catch (e) {
+        log("_isSmartObjectLinkBroken failed for '" + layerName + "': " + e, 'E');
+    }
     return false;
 }
 
 function _collectBrokenSmartObjectLayers(layers, result) {
     /***
-     * Recursively walk 'layers', pushing names of broken smart object layers
-     * into 'result'.
+     * Recursively walk 'layers', pushing full paths of broken smart object
+     * layers into 'result'.
      ***/
     for (var i = 0; i < layers.length; i++) {
         var layer = layers[i];
@@ -837,7 +884,7 @@ function _collectBrokenSmartObjectLayers(layers, result) {
             _collectBrokenSmartObjectLayers(layer.layers, result);
         } else if (layer.kind === LayerKind.SMARTOBJECT) {
             if (_isSmartObjectLinkBroken(layer)) {
-                result.push(layer.name);
+                result.push(_get_long_layer_name(layer));
             }
         }
     }
@@ -845,11 +892,11 @@ function _collectBrokenSmartObjectLayers(layers, result) {
 
 function getBrokenSmartObjectLinks() {
     /***
-     * Return a JSON array of layer names that have broken or missing smart
-     * object links (both local files and CC Libraries assets).
+     * Return a JSON array of full layer paths that have broken or missing
+     * smart object links (both local files and CC Libraries assets).
      *
      * Returns:
-     *    JSON string: array of layer name strings
+     *    JSON string: array of "GROUP/.../LAYER" path strings
      ***/
     var doc = app.activeDocument;
     var broken = [];
@@ -863,23 +910,55 @@ function fixBrokenSmartObjectLinks() {
      * back to a fresh embedded smart object, severing the stale cloud/file
      * reference.  Iterates backwards so layer indices stay stable.
      *
+     * Selecting a hidden layer via 'activeLayer' forces it (and every hidden
+     * parent group) visible, so the visibility of the whole chain is
+     * snapshotted before the repair and restored afterwards.
+     *
      * Returns:
-     *    JSON string: array of layer names that were repaired
+     *    JSON string: array of full paths of layers that were repaired
      ***/
     var doc = app.activeDocument;
     var fixed = [];
 
     function repairLayer(layer) {
+        var layerName = _get_long_layer_name(layer);
+        var chain = [];
+        var node = layer;
+        while (node && node.typename !== "Document") {
+            chain.push({node: node, visible: node.visible});
+            node = node.parent;
+        }
+
+        var selected = false;
+        var converted = false;
         try {
             doc.activeLayer = layer;
-            var layerName = layer.name;
+            selected = true;
             layer.rasterize(RasterizeType.ENTIRELAYER);
-            var desc = new ActionDescriptor();
             executeAction(
-                stringIDToTypeID("newPlacedLayer"), desc, DialogModes.NO
+                stringIDToTypeID("newPlacedLayer"),
+                new ActionDescriptor(),
+                DialogModes.NO
             );
+            converted = true;
             fixed.push(layerName);
-        } catch (e) {}
+        } catch (e) {
+            log("fixBrokenSmartObjectLinks failed for '" + layerName +
+                "': " + e, 'E');
+        }
+
+        if (selected) {
+            if (converted) {
+                // 'layer' is stale once re-embedded; the fresh smart object
+                // is the active layer.
+                try { doc.activeLayer.visible = chain[0].visible; } catch (e) {}
+            } else {
+                try { layer.visible = chain[0].visible; } catch (e) {}
+            }
+        }
+        for (var k = 1; k < chain.length; k++) {
+            try { chain[k].node.visible = chain[k].visible; } catch (e) {}
+        }
     }
 
     function inspectAndFix(layers) {
